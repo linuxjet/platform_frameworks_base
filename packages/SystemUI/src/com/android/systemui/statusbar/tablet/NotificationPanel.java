@@ -23,6 +23,7 @@ import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
 import android.util.Slog;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -39,14 +40,15 @@ import android.widget.ScrollView;
 import com.android.systemui.ExpandHelper;
 import com.android.systemui.R;
 import com.android.systemui.statusbar.policy.NotificationRowLayout;
+import com.android.systemui.statusbar.policy.Prefs;
+import com.android.systemui.statusbar.policy.toggles.TogglesView;
 
-public class NotificationPanel extends RelativeLayout implements StatusBarPanel,
-        View.OnClickListener {
+public class NotificationPanel extends RelativeLayout implements StatusBarPanel {
     private ExpandHelper mExpandHelper;
     private NotificationRowLayout latestItems;
 
     static final String TAG = "Tablet/NotificationPanel";
-    static final boolean DEBUG = false;
+    static final boolean DEBUG = true;
 
     final static int PANEL_FADE_DURATION = 150;
 
@@ -70,6 +72,9 @@ public class NotificationPanel extends RelativeLayout implements StatusBarPanel,
     float mContentFrameMissingTranslation;
 
     Choreographer mChoreo = new Choreographer();
+
+    TogglesView mQuickToggles;
+    boolean togglesVisible;
 
     public NotificationPanel(Context context, AttributeSet attrs) {
         this(context, attrs, 0);
@@ -106,6 +111,10 @@ public class NotificationPanel extends RelativeLayout implements StatusBarPanel,
         mClearButton.setOnClickListener(mClearButtonListener);
 
         mShowing = false;
+
+        mQuickToggles = (TogglesView) findViewById(R.id.quick_toggles);
+        setToggleVisibility();
+
     }
 
     @Override
@@ -130,6 +139,7 @@ public class NotificationPanel extends RelativeLayout implements StatusBarPanel,
     }
 
     public void show(boolean show, boolean animate) {
+        setToggleVisibility();
         if (animate) {
             if (mShowing != show) {
                 mShowing = show;
@@ -216,20 +226,56 @@ public class NotificationPanel extends RelativeLayout implements StatusBarPanel,
     }
     */
 
+/*
     public void onClick(View v) {
         if (mSettingsButton.isEnabled() && v == mTitleArea) {
             swapPanels();
         }
     }
+*/
 
     public void setNotificationCount(int n) {
         mNotificationCount = n;
     }
 
+    private void setToggleVisibility() {
+        togglesVisible = Prefs.read(getContext()).getBoolean(Prefs.SHOW_TOGGLES, true);
+        mQuickToggles
+                .setVisibility(togglesVisible ? View.VISIBLE
+                        : View.GONE);
+
+        DisplayMetrics metrics = getContext().getResources().getDisplayMetrics();
+        float dp = -50f;
+        int pixels = (int) (metrics.density * dp + 0.5f);
+
+        LayoutParams lp = (LayoutParams) mContentFrame.getLayoutParams();
+        lp.bottomMargin = (!togglesVisible ? pixels : 0);
+        mContentFrame.setLayoutParams(lp);
+    }
+
+    private void adjustQuickToggles(boolean showing) {
+
+        DisplayMetrics metrics = getContext().getResources().getDisplayMetrics();
+        float dp = -50f;
+        int pixels = (int) (metrics.density * dp + 0.5f);
+
+        LayoutParams lp = (LayoutParams) mQuickToggles.getLayoutParams();
+        lp.bottomMargin = (showing ? pixels : 0);
+        mQuickToggles.setLayoutParams(lp);
+    }
+
     public void setContentFrameVisible(final boolean showing, boolean animate) {
+        setToggleVisibility();
+
+        if (showing) {
+            adjustQuickToggles(true);
+        } else {
+            adjustQuickToggles(false);
+        }
     }
 
     public void swapPanels() {
+        setToggleVisibility();
         final View toShow, toHide;
         if (mSettingsView == null) {
             addSettingsView();
@@ -259,6 +305,7 @@ public class NotificationPanel extends RelativeLayout implements StatusBarPanel,
                 }
                 updateClearButton();
                 updatePanelModeButtons();
+                setToggleVisibility();
             }
         });
         a.start();

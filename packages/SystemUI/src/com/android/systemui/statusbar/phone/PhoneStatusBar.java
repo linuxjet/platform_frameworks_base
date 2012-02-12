@@ -28,12 +28,10 @@ import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.StatusBarManager;
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
+import android.content.*;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.PixelFormat;
@@ -42,11 +40,7 @@ import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.NinePatchDrawable;
 import android.inputmethodservice.InputMethodService;
-import android.os.IBinder;
-import android.os.Message;
-import android.os.RemoteException;
-import android.os.ServiceManager;
-import android.os.SystemClock;
+import android.os.*;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -83,13 +77,8 @@ import com.android.systemui.statusbar.CommandQueue;
 import com.android.systemui.statusbar.RotationToggle;
 import com.android.systemui.statusbar.SignalClusterView;
 import com.android.systemui.statusbar.StatusBarIconView;
-import com.android.systemui.statusbar.policy.BatteryController;
-import com.android.systemui.statusbar.policy.DateView;
-import com.android.systemui.statusbar.policy.IntruderAlertView;
-import com.android.systemui.statusbar.policy.LocationController;
-import com.android.systemui.statusbar.policy.OnSizeChangedListener;
-import com.android.systemui.statusbar.policy.NetworkController;
-import com.android.systemui.statusbar.policy.NotificationRowLayout;
+import com.android.systemui.statusbar.policy.*;
+import com.android.systemui.statusbar.policy.toggles.TogglesView;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -137,6 +126,9 @@ public class PhoneStatusBar extends BaseStatusBar {
     private float mFlingGestureMaxOutputVelocityPx; // how fast can it really go? (should be a little 
                                                     // faster than mSelfCollapseVelocityPx)
 
+    private float mScreenWidth;
+    private int mMinBrightness;
+
     PhoneStatusBarPolicy mIconPolicy;
 
     // These are no longer handled by the policy, because we need custom strategies for them
@@ -177,6 +169,10 @@ public class PhoneStatusBar extends BaseStatusBar {
     View mClearButton;
     View mSettingsButton;
     RotationToggle mRotationButton;
+
+    // toggles
+    TogglesView mQuickToggles;
+    BrightnessController mBrightness;
 
     // carrier/wifi label
     private TextView mCarrierLabel;
@@ -227,7 +223,12 @@ public class PhoneStatusBar extends BaseStatusBar {
     float mFlingVelocity;
     int mFlingY;
     int[] mAbsPos = new int[2];
+    int mLinger = 0;
     Runnable mPostCollapseCleanup = null;
+
+    boolean mQuickTogglesHideAfterCollapse = true;
+
+    LinearLayout mCenterCLockLayout;
 
     private AnimatorSet mLightsOutAnimation;
     private AnimatorSet mLightsOnAnimation;
@@ -336,6 +337,10 @@ public class PhoneStatusBar extends BaseStatusBar {
 
         mIconSize = res.getDimensionPixelSize(com.android.internal.R.dimen.status_bar_icon_size);
 
+        mScreenWidth = (float) context.getResources().getDisplayMetrics().widthPixels;
+        mMinBrightness = context.getResources().getInteger(
+ 	 	        com.android.internal.R.integer.config_screenBrightnessDim);
+
         mStatusBarWindow = (StatusBarWindowView) View.inflate(context,
                 R.layout.super_status_bar, null);
         if (DEBUG) {
@@ -428,13 +433,17 @@ public class PhoneStatusBar extends BaseStatusBar {
         mDateView = (DateView)mStatusBarWindow.findViewById(R.id.date);
         mSettingsButton = mStatusBarWindow.findViewById(R.id.settings_button);
         mSettingsButton.setOnClickListener(mSettingsButtonListener);
+        mSettingsButton.setOnLongClickListener(mSettingsLongClickListener);
         mRotationButton = (RotationToggle) mStatusBarWindow.findViewById(R.id.rotation_lock_button);
+
         
         mCarrierLabel = (TextView)mStatusBarWindow.findViewById(R.id.carrier_label);
         mCarrierLabel.setVisibility(mCarrierLabelVisible ? View.VISIBLE : View.INVISIBLE);
 
         mScrollView = (ScrollView)mStatusBarWindow.findViewById(R.id.scroll);
         mScrollView.setVerticalScrollBarEnabled(false); // less drawing during pulldowns
+
+        mQuickToggles = (TogglesView) mStatusBarWindow.findViewById(R.id.quick_toggles);
 
         mTicker = new MyTicker(context, mStatusBarView);
 
@@ -486,6 +495,14 @@ public class PhoneStatusBar extends BaseStatusBar {
         filter.addAction(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         context.registerReceiver(mBroadcastReceiver, filter);
+
+        SettingsObserver observer = new SettingsObserver(new Handler());
+        observer.observe();
+        updateSettings();
+
+        mQuickToggles.setVisibility(Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.STATUSBAR_TOGGLES_VISIBILITY, 0) == 1 ? View.VISIBLE : View.GONE);
+        mQuickToggles.setBar(this);
 
         return mStatusBarView;
     }
@@ -1281,6 +1298,8 @@ public class PhoneStatusBar extends BaseStatusBar {
         updateExpandedViewPos(EXPANDED_FULL_OPEN);
 
         if (false) postStartTracing();
+
+        mQuickToggles.onStatusbarExpanded();
     }
 
     void performCollapse() {
@@ -1306,6 +1325,11 @@ public class PhoneStatusBar extends BaseStatusBar {
 
         if ((mDisabled & StatusBarManager.DISABLE_NOTIFICATION_ICONS) == 0) {
             setNotificationIconVisibility(true, com.android.internal.R.anim.fade_in);
+        }
+
+        if (mQuickTogglesHideAfterCollapse) {
+            mQuickToggles.setVisibility(View.GONE);
+            Settings.System.putInt(mContext.getContentResolver(), Settings.System.STATUSBAR_TOGGLES_VISIBILITY, 0);
         }
 
         if (!mExpanded) {
@@ -1605,7 +1629,48 @@ public class PhoneStatusBar extends BaseStatusBar {
             trackMovement(event);
             if (action == MotionEvent.ACTION_MOVE) {
                 if (mAnimatingReveal && (y + mViewDelta) < mNotificationPanelMinHeight) {
-                    // nothing
+                    boolean brightnessControl = Settings.System.getInt(mStatusBarView.getContext()
+                            .getContentResolver(),
+                            Settings.System.STATUS_BAR_BRIGHTNESS_TOGGLE, 0) == 1;
+                    if (brightnessControl) {
+                        mVelocityTracker.computeCurrentVelocity(1000);
+                        float yVel = mVelocityTracker.getYVelocity();
+                        yVel = Math.abs(yVel);
+                        if (yVel < 50.0f) {
+                            if (mLinger > 20) {
+                                Context context = mStatusBarView.getContext();
+                                boolean autoBrightness = Settings.System.getInt(
+                                        context.getContentResolver(),
+                                        Settings.System.SCREEN_BRIGHTNESS_MODE, 0) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC;
+                                if (!autoBrightness) {
+                                    float x = (float) event.getRawX();
+                                    int newBrightness = (int) Math
+                                            .round(((x / mScreenWidth) * PowerManager.BRIGHTNESS_ON));
+                                    newBrightness = Math.min(newBrightness,
+                                            PowerManager.BRIGHTNESS_ON);
+
+
+                                    newBrightness = Math.max(newBrightness, mMinBrightness);
+                                    try {
+                                        IPowerManager power = IPowerManager.Stub
+                                                .asInterface(ServiceManager.getService("power"));
+                                        if (power != null) {
+                                            power.setBacklightBrightness(newBrightness);
+                                            Settings.System.putInt(context.getContentResolver(),
+                                                    Settings.System.SCREEN_BRIGHTNESS,
+                                                    newBrightness);
+                                        }
+                                    } catch (RemoteException e) {
+                                        Slog.w(TAG, "Setting Brightness failed: " + e);
+                                    }
+                                }
+                            } else {
+                                mLinger++;
+                            }
+                        } else {
+                            mLinger = 0;
+                        }
+                    }
                 } else  {
                     mAnimatingReveal = false;
                     updateExpandedViewPos(y + mViewDelta);
@@ -2230,20 +2295,124 @@ public class PhoneStatusBar extends BaseStatusBar {
     };
 
     private View.OnClickListener mSettingsButtonListener = new View.OnClickListener() {
+
+        @Override
         public void onClick(View v) {
-            // We take this as a good indicator that Setup is running and we shouldn't
-            // allow you to go somewhere else
-            if (!isDeviceProvisioned()) return;
-            try {
-                // Dismiss the lock screen when Settings starts.
-                ActivityManagerNative.getDefault().dismissKeyguardOnNextActivity();
-            } catch (RemoteException e) {
-            }
-            v.getContext().startActivity(new Intent(Settings.ACTION_SETTINGS)
-                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            animateCollapse();
-        }
+
+            if (mDropdownSettingsDefualtBehavior)
+                mSettingsBehaviorOpenSettings();
+            else
+                mSettingsBehaviorOpenToggles();
+       }
     };
+
+    private View.OnLongClickListener mSettingsLongClickListener = new View.OnLongClickListener() {
+
+        @Override
+        public boolean onLongClick(View v) {
+
+            if (mDropdownSettingsDefualtBehavior)
+                mSettingsBehaviorOpenToggles();
+            else
+                mSettingsBehaviorOpenSettings();
+            return true;
+        }
+     };
+
+    private void mSettingsBehaviorOpenSettings() {
+        try {
+            // Dismiss the lock screen when Settings starts.
+            ActivityManagerNative.getDefault().dismissKeyguardOnNextActivity();
+        } catch (RemoteException e) {
+        }
+        mContext.startActivity(new Intent(Settings.ACTION_SETTINGS)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        animateCollapse();
+    }
+
+    private void mSettingsBehaviorOpenToggles() {
+        if (mQuickToggles.getVisibility() == View.VISIBLE) {
+            int height = mQuickToggles.getHeight();
+
+            Animation a =
+                    AnimationUtils.makeOutAnimation(mContext, true);
+            a.setDuration(400);
+            a.setAnimationListener(new Animation.AnimationListener() {
+
+                @Override
+                public void onAnimationEnd(Animation animation) {
+                    mQuickToggles.setVisibility(View.GONE);
+                    Settings.System.putInt(mContext.getContentResolver(), Settings.System.STATUSBAR_TOGGLES_VISIBILITY, 0);
+                }
+
+                @Override
+                public void onAnimationStart(Animation animation) {
+                }
+
+                @Override
+                public void onAnimationRepeat(Animation animation) {
+                }
+            });
+            mQuickToggles.startAnimation(a);
+        } else {
+            Animation a =
+                    AnimationUtils.makeInAnimation(mContext, true);
+            a.setDuration(400);
+            a.setAnimationListener(new Animation.AnimationListener() {
+
+                @Override
+                public void onAnimationEnd(Animation animation) {
+                }
+
+                @Override
+                public void onAnimationStart(Animation animation) {
+                    mQuickToggles.setVisibility(View.VISIBLE);
+                    Settings.System.putInt(mContext.getContentResolver(), Settings.System.STATUSBAR_TOGGLES_VISIBILITY, 1);
+                }
+
+                @Override
+                public void onAnimationRepeat(Animation animation) {
+                }
+            });
+            mQuickToggles.startAnimation(a);
+        }
+
+    }
+
+    class SettingsObserver extends ContentObserver {
+        SettingsObserver(Handler handler) {
+            super(handler);
+        }
+
+
+
+        void observe() {
+            ContentResolver resolver = mContext.getContentResolver();
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.STATUSBAR_SETTINGS_BEHAVIOR), false, this);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.STATUSBAR_QUICKTOGGLES_AUTOHIDE), false, this);
+
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            updateSettings();
+        }
+    }
+
+    boolean mDropdownSettingsDefualtBehavior = true;
+
+    private void updateSettings() {
+        // Slog.i(TAG, "updated settings values");
+        ContentResolver cr = mContext.getContentResolver();
+        mDropdownSettingsDefualtBehavior = Settings.System.getInt(cr,
+                Settings.System.STATUSBAR_SETTINGS_BEHAVIOR, 0) == 1;
+
+        mQuickTogglesHideAfterCollapse = Settings.System.getInt(cr,
+                Settings.System.STATUSBAR_QUICKTOGGLES_AUTOHIDE, 1) == 1;
+
+    }
 
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent) {
@@ -2401,6 +2570,10 @@ public class PhoneStatusBar extends BaseStatusBar {
             vibrate();
         }
     };
+
+    public boolean isTablet() {
+        return false;
+    }
 
     @Override
     protected void haltTicker() {

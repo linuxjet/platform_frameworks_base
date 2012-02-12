@@ -46,18 +46,26 @@
         android:layout_marginBottom="@dimen/close_handle_underlap"
         >
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" >
+
         <include layout="@layout/status_bar_expanded_header"
             android:layout_width="match_parent"
             android:layout_height="@dimen/notification_panel_header_height"
             />
      
+            <include
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                layout="@layout/quick_toggles" />
         <ScrollView
             android:id="@+id/scroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fadingEdge="none"
             android:overScrollMode="ifContentScrolls"
-            android:layout_marginTop="@dimen/notification_panel_header_height"
             >
             <com.android.systemui.statusbar.policy.NotificationRowLayout
                 android:id="@+id/latestItems"
@@ -66,6 +74,7 @@
                 systemui:rowHeight="@dimen/notification_row_min_height"
                 />
         </ScrollView>
+        </LinearLayout>
     </FrameLayout>
 
     <com.android.systemui.statusbar.phone.CloseDragHandle android:id="@+id/close"

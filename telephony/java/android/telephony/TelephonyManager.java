@@ -473,6 +473,28 @@ public class TelephonyManager {
         }
     }
 
+    /**
+     * @hide
+     */
+    public void toggleLTE(boolean on) {
+        try {
+            getITelephony().toggleLTE(on);
+        } catch (RemoteException e) {
+            // Silently fail
+        }
+    }
+    
+    /**
+     * @hide
+     */
+    public void toggle2G(boolean on) {
+        try {
+            getITelephony().toggle2G(on);
+        } catch (RemoteException e) {
+            // Silently fail
+        }
+    }
+
     /** Unknown network class. {@hide} */
     public static final int NETWORK_CLASS_UNKNOWN = 0;
     /** Class of broadly defined "2G" networks. {@hide} */

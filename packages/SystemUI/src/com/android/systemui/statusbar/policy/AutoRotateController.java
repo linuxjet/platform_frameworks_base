@@ -16,6 +16,9 @@
 
 package com.android.systemui.statusbar.policy;
 
+import android.database.ContentObserver;
+import android.os.Handler;
+import android.provider.Settings;
 import com.android.internal.view.RotationPolicy;
 
 import android.content.Context;
@@ -27,6 +30,15 @@ public final class AutoRotateController implements CompoundButton.OnCheckedChang
     private final RotationLockCallbacks mCallbacks;
 
     private boolean mAutoRotation;
+    private boolean mSystemUpdate;
+
+    private ContentObserver mAccelerometerRotationObserver = new ContentObserver(new Handler()) {
+        @Override
+        public void onChange(boolean selfChange) {
+            updateAccelerometerRotationCheckbox();
+        }
+    };
+
 
     private final RotationPolicy.RotationPolicyListener mRotationPolicyListener =
             new RotationPolicy.RotationPolicyListener() {
@@ -49,10 +61,20 @@ public final class AutoRotateController implements CompoundButton.OnCheckedChang
     }
 
     public void onCheckedChanged(CompoundButton view, boolean checked) {
+        if (mSystemUpdate) return;
+
         if (checked != mAutoRotation) {
             mAutoRotation = checked;
             RotationPolicy.setRotationLock(mContext, !checked);
         }
+    }
+
+    private void updateAccelerometerRotationCheckbox() {
+        mSystemUpdate = true;
+        mCheckbox.setChecked(Settings.System.getInt(
+                mContext.getContentResolver(),
+                Settings.System.ACCELEROMETER_ROTATION, 0) != 0);
+        mSystemUpdate = false;
     }
 
     public void release() {
