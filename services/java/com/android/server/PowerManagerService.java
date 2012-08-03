@@ -292,6 +292,10 @@ public class PowerManagerService extends IPowerManager.Stub
     private int mAnimationSetting = ANIM_SETTING_OFF;
     private float mWindowScaleAnimation;
 
+	//Allow for screen to automaticaly dim per setting
+    private boolean mAllowBrightnessDecrease = false;
+    private BrightnessSettingsObserver mBrightnessSettingsObserver;
+
     // Must match with the ISurfaceComposer constants in C++.
     private static final int ANIM_SETTING_ON = 0x01;
     private static final int ANIM_SETTING_OFF = 0x10;
@@ -696,6 +700,14 @@ public class PowerManagerService extends IPowerManager.Stub
                     updateSettingsValues();
                 }
             });
+
+        handleAllowBrightnessDecrease();
+		mBrightnessSettingsObserver = new BrightnessSettingsObserver(
+						new AllowBrightnessDecreaseHandler(), 0);
+		mContext.getContentResolver().registerContentObserver(
+						Settings.System.getUriFor(Settings.System.SCREEN_AUTO_BRIGHTNESS_DIM),
+						true, mBrightnessSettingsObserver);
+
         updateSettingsValues();
 
         synchronized (mHandlerThread) {
@@ -1761,6 +1773,7 @@ public class PowerManagerService extends IPowerManager.Stub
                             + Integer.toHexString(mPowerState)
                             + " mSkippedScreenOn=" + mSkippedScreenOn);
                 }
+        Slog.v(TAG,"setScreenStateLocked() nimationDuration: " + 0);
                 mScreenBrightnessAnimator.animateTo(PowerManager.BRIGHTNESS_OFF, SCREEN_BRIGHT_BIT, 0);
             }
         }
@@ -2348,6 +2361,7 @@ public class PowerManagerService extends IPowerManager.Stub
                             + ", sensor=" + sensorTarget
                             + ", mask=" + mask
                             + ", duration=" + animationDuration +")"
+                            + ", mWindowScaleAnimation=" + mWindowScaleAnimation
                             + ", currentValue=" + currentValue
                             + ", startTime=" + startTimeMillis);
                 }
@@ -2728,7 +2742,7 @@ public class PowerManagerService extends IPowerManager.Stub
                             steps = IMMEDIATE_ANIM_STEPS;
                         } else {
                             synchronized (mScreenBrightnessAnimator) {
-                                if (mScreenBrightnessAnimator.currentValue <= lcdValue) {
+                                if (mScreenBrightnessAnimator.currentValue <= lcdValue || mAllowBrightnessDecrease) {
                                     steps = AUTOBRIGHTNESS_ANIM_STEPS;
                                 } else {
                                     steps = AUTODIMNESS_ANIM_STEPS;
@@ -3400,4 +3414,30 @@ public class PowerManagerService extends IPowerManager.Stub
             // ignore
         }
     };
+
+    private void handleAllowBrightnessDecrease() {
+        mAllowBrightnessDecrease = 
+             (Settings.System.getInt(mContext.getContentResolver(), Settings.System.SCREEN_AUTO_BRIGHTNESS_DIM, 0) == 1);
+    }
+    
+    private class AllowBrightnessDecreaseHandler extends Handler {
+        public void handleMessage (Message m){
+            handleAllowBrightnessDecrease();
+        }
+    }
+    
+    private class BrightnessSettingsObserver extends ContentObserver {
+        Handler handler;
+        int message;
+        
+        public BrightnessSettingsObserver(Handler handler, int message) {
+                super(handler);
+                this.handler = handler;
+                this.message = message;
+        }
+        
+        public void onChange(boolean selfChange){
+                handler.sendEmptyMessage(message);
+        }
+    }
 }
