@@ -1416,6 +1416,11 @@ public final class Settings {
         public static final String SCREEN_AUTO_BRIGHTNESS_ADJ = "screen_auto_brightness_adj";
 
         /**
+         * Control whether to allow screen to automatically dim screen
+         */
+        public static final String SCREEN_AUTO_BRIGHTNESS_DIM = "screen_auto_brightness_dim";
+
+        /**
          * SCREEN_BRIGHTNESS_MODE value for manual mode.
          */
         public static final int SCREEN_BRIGHTNESS_MODE_MANUAL = 0;
