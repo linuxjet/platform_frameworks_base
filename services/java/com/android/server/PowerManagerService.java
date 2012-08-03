@@ -1773,6 +1773,7 @@ public class PowerManagerService extends IPowerManager.Stub
                             + Integer.toHexString(mPowerState)
                             + " mSkippedScreenOn=" + mSkippedScreenOn);
                 }
+        Slog.v(TAG,"setScreenStateLocked() nimationDuration: " + 0);
                 mScreenBrightnessAnimator.animateTo(PowerManager.BRIGHTNESS_OFF, SCREEN_BRIGHT_BIT, 0);
             }
         }
@@ -2360,6 +2361,7 @@ public class PowerManagerService extends IPowerManager.Stub
                             + ", sensor=" + sensorTarget
                             + ", mask=" + mask
                             + ", duration=" + animationDuration +")"
+                            + ", mWindowScaleAnimation=" + mWindowScaleAnimation
                             + ", currentValue=" + currentValue
                             + ", startTime=" + startTimeMillis);
                 }
