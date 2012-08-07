@@ -3380,7 +3380,7 @@ public class PowerManagerService extends IPowerManager.Stub
                 mLightSensorPendingIncrease = (value > mLightSensorValue);
                 if (mLightSensorPendingDecrease || mLightSensorPendingIncrease) {
                     mLightSensorPendingValue = value;
-                    mHandler.postDelayed(mAutoBrightnessTask, LIGHT_SENSOR_DELAY);
+					mHandler.postDelayed(mAutoBrightnessTask, mLightSensorPendingIncrease ? LIGHT_SENSOR_DELAY : LIGHT_SENSOR_DELAY * 2 );
                 }
             } else {
                 mLightSensorPendingValue = value;
